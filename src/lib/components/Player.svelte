@@ -8,7 +8,7 @@
     //     'https://firebasestorage.googleapis.com/v0/b/video-directory-67299.appspot.com/o/videos%2F2020-10-26-348519501?alt=media&token=14308c59-03a3-473d-b0dd-534fc1a6bb5d'
 	// ];
 
-	const { videoURLs: videoUrls } = $props();
+	const { videoURLs: videoUrls, fullWidth = false } = $props();
 
 	let currentVideoIndex = $state(0);
 	let videoElement;
@@ -234,12 +234,11 @@
 	<meta name="description" content="Gigglr advertising network streaming channel featuring premium content." />
 </svelte:head>
 
-<div class="tv-wrapper">
+<div class="tv-wrapper {fullWidth ? 'full-width' : ''}">
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<div
 		bind:this={containerElement}
-		class="tv-container"
-		class:fullscreen={isFullscreen}
+		class="tv-container {isFullscreen ? 'fullscreen' : ''} {fullWidth ? 'full-width' : ''}"
 		onmousemove={handleMouseMove}
 		onclick={handleVideoClick}
 		onkeydown={handleKeydown}
@@ -452,22 +451,67 @@
 		image-rendering: -webkit-optimize-contrast;
 	}
 
-	/* Responsive breakpoints */
+	/* Full-width mode overrides - extremely aggressive */
+	.tv-wrapper.full-width {
+		padding: 0 !important;
+		margin: 0 !important;
+		margin-left: 0 !important;
+		margin-right: 0 !important;
+		margin-top: 0 !important;
+		margin-bottom: 0 !important;
+		display: block !important;
+		align-items: unset !important;
+		justify-content: unset !important;
+		min-height: 100vh !important;
+		width: 100vw !important;
+		max-width: 100vw !important;
+		position: fixed !important;
+		top: 0 !important;
+		left: 0 !important;
+		right: 0 !important;
+		bottom: 0 !important;
+		z-index: 1000 !important;
+	}
+
+	.tv-container.full-width {
+		max-width: 100vw !important;
+		margin: 0 !important;
+		margin-left: 0 !important;
+		margin-right: 0 !important;
+		margin-top: 0 !important;
+		margin-bottom: 0 !important;
+		padding: 0 !important;
+		padding-left: 0 !important;
+		padding-right: 0 !important;
+		padding-top: 0 !important;
+		padding-bottom: 0 !important;
+		width: 100vw !important;
+		height: 100vh !important;
+		border-radius: 0 !important;
+		box-shadow: none !important;
+		position: absolute !important;
+		top: 0 !important;
+		left: 0 !important;
+		right: 0 !important;
+		bottom: 0 !important;
+	}
+
+	/* Responsive breakpoints (only apply when not full-width) */
 	@media (min-width: 768px) {
-		.tv-container:not(.fullscreen) {
+		.tv-container:not(.full-width) {
 			max-width: 90vw;
 			margin: 2rem auto;
 		}
 	}
 
 	@media (min-width: 1024px) {
-		.tv-container:not(.fullscreen) {
+		.tv-container:not(.full-width) {
 			max-width: 80vw;
 		}
 	}
 
 	@media (min-width: 1440px) {
-		.tv-container:not(.fullscreen) {
+		.tv-container:not(.full-width) {
 			max-width: 70vw;
 		}
 	}

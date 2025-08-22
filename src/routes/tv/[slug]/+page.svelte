@@ -309,7 +309,7 @@
 	</div>
 {:else if tvData && videoURLs.length > 0}
 	<div class="tv-player-container">
-		<Player videoURLs={videoURLs} />
+		<Player videoURLs={videoURLs} fullWidth={true} />
 
 		<!-- Sync Button - Floating in top-left corner -->
 		<div class="sync-controls">
@@ -337,6 +337,8 @@
 {/if}
 
 <style>
+
+
 	.loading-screen {
 		min-height: 100vh;
 		display: flex;
@@ -466,11 +468,12 @@
 		}
 	}
 
-	/* TV Player Container */
+	/* TV Player Container - Full-width layout */
 	.tv-player-container {
-		position: relative;
 		width: 100%;
-		height: 100vh;
+		margin: 0;
+		padding: 0;
+		position: relative;
 	}
 
 	/* Sync Controls */
