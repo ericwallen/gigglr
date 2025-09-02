@@ -63,6 +63,33 @@ export class VideoService {
         }
     }
 
+    static async deleteVideoWithCleanup(videoId) {
+        try {
+            // First get the video document to get file paths
+            const videoRef = doc(DB, COLLECTIONS.VIDEOS, videoId);
+            const videoDoc = await getDoc(videoRef);
+
+            if (!videoDoc.exists()) {
+                return { success: false, error: 'Video not found' };
+            }
+
+            const videoData = videoDoc.data();
+
+            // Delete the Firestore document first
+            await deleteDoc(videoRef);
+
+            // Return file paths for cleanup (to be handled by storage service)
+            return {
+                success: true,
+                filePath: videoData.filePath,
+                thumbnailURL: videoData.thumbnailURL
+            };
+        } catch (error) {
+            console.error('Error deleting video with cleanup:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
     static async getVideo(videoId) {
         try {
             const videoDoc = await getDoc(doc(DB, COLLECTIONS.VIDEOS, videoId));
@@ -360,6 +387,56 @@ export class TVService {
             return { success: true };
         } catch (error) {
             console.error('Error updating video order:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    static async cleanupTVVideoReferences(tvId, videoIds) {
+        try {
+            console.log('🧹 Cleaning up TV video references for TV:', tvId);
+
+            // Check which videos still exist
+            const validVideoIds = [];
+            const invalidVideoIds = [];
+
+            for (const videoId of videoIds) {
+                const videoRef = doc(DB, COLLECTIONS.VIDEOS, videoId);
+                const videoDoc = await getDoc(videoRef);
+
+                if (videoDoc.exists()) {
+                    validVideoIds.push(videoId);
+                } else {
+                    invalidVideoIds.push(videoId);
+                    console.log('❌ Found invalid video reference:', videoId);
+                }
+            }
+
+            // Update TV with only valid video IDs if any were removed
+            if (invalidVideoIds.length > 0) {
+                console.log(`🔧 Removing ${invalidVideoIds.length} invalid video references`);
+                const tvRef = doc(DB, COLLECTIONS.TVS, tvId);
+                await updateDoc(tvRef, {
+                    videoIds: validVideoIds,
+                    updatedAt: new Date()
+                });
+
+                return {
+                    success: true,
+                    cleaned: true,
+                    removedCount: invalidVideoIds.length,
+                    validVideoIds,
+                    invalidVideoIds
+                };
+            }
+
+            return {
+                success: true,
+                cleaned: false,
+                validVideoIds
+            };
+
+        } catch (error) {
+            console.error('Error cleaning up TV video references:', error);
             return { success: false, error: error.message };
         }
     }

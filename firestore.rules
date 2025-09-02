@@ -1,0 +1,89 @@
+rules_version = '2';
+
+// Firestore Security Rules for Gigglr
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Users collection - users can read/write their own document
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // Allow admins to read/write all user documents
+      allow read, write: if request.auth != null &&
+        request.auth.token.admin == true;
+    }
+
+    // Videos collection - users can manage their own videos
+    match /Videos/{videoId} {
+      // Allow read/write for document owner
+      allow read, write: if request.auth != null &&
+        request.auth.uid == resource.data.ownerId;
+
+      // Allow create if the user is setting themselves as owner
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.ownerId &&
+        isValidVideoData();
+
+      // Allow public read for ALL videos (needed for TV playback without auth)
+      // Security is handled by PIN verification in the app
+      allow read: if true;
+
+      // Allow admins to read/write all videos
+      allow read, write: if request.auth != null &&
+        request.auth.token.admin == true;
+    }
+
+    // TVs collection - TV channel management
+    match /TVs/{tvId} {
+      // Allow read/write for document owner (authenticated users managing their TVs)
+      allow read, write: if request.auth != null &&
+        request.auth.uid == resource.data.ownerId;
+
+      // Allow create if the user is setting themselves as owner
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.ownerId &&
+        isValidTVData();
+
+      // Allow public read for ALL TVs (PIN verification handled in app)
+      // This is needed for /tv/slug access without authentication
+      allow read: if true;
+
+      // Allow admins to read/write all TVs
+      allow read, write: if request.auth != null &&
+        request.auth.token.admin == true;
+    }
+
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+
+  // Helper functions for data validation
+  function isValidVideoData() {
+    let data = request.resource.data;
+    return data.keys().hasAll(['title', 'ownerId', 'ownerEmail', 'downloadURL', 'status']) &&
+           data.title is string &&
+           data.title.size() > 0 &&
+           data.ownerId is string &&
+           data.ownerEmail is string &&
+           data.downloadURL is string &&
+           data.status in ['active', 'inactive', 'processing'] &&
+           (data.thumbnailURL == null || data.thumbnailURL is string);
+  }
+
+  function isValidTVData() {
+    let data = request.resource.data;
+    return data.keys().hasAll(['name', 'slug', 'pin', 'ownerId', 'ownerEmail', 'isActive']) &&
+           data.name is string &&
+           data.name.size() > 0 &&
+           data.slug is string &&
+           data.slug.size() > 0 &&
+           data.pin is string &&
+           data.pin.size() >= 4 &&
+           data.ownerId is string &&
+           data.ownerEmail is string &&
+           data.isActive is bool &&
+           (data.videoIds == null || data.videoIds is list);
+  }
+}

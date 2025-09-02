@@ -23,6 +23,7 @@
 	let filePreview = $state(null);
 	let fileDuration = $state(null);
 	let thumbnail = $state(null);
+	let thumbnailBlob = $state(null);
 
 	function handleDragOver(event) {
 		event.preventDefault();
@@ -79,7 +80,7 @@
 
 		// Generate thumbnail
 		try {
-			const thumbnailBlob = await StorageService.generateVideoThumbnail(file);
+			thumbnailBlob = await StorageService.generateVideoThumbnail(file);
 			if (thumbnailBlob) {
 				thumbnail = URL.createObjectURL(thumbnailBlob);
 			}
@@ -109,6 +110,7 @@
 		filePreview = null;
 		fileDuration = null;
 		thumbnail = null;
+		thumbnailBlob = null;
 		uploadError = '';
 		uploadSuccess = false;
 	}
@@ -145,8 +147,29 @@
 
 			console.log('✅ Storage upload successful:', uploadResult.downloadURL);
 
+			// Upload thumbnail if available
+			let thumbnailURL = null;
+			if (thumbnailBlob) {
+				console.log('🔧 Step 2: Uploading thumbnail...');
+				try {
+					const thumbnailResult = await StorageService.uploadThumbnail(
+						thumbnailBlob,
+						$user.uid,
+						uploadResult.fileName
+					);
+					if (thumbnailResult.success) {
+						thumbnailURL = thumbnailResult.downloadURL;
+						console.log('✅ Thumbnail upload successful:', thumbnailURL);
+					} else {
+						console.warn('⚠️ Thumbnail upload failed:', thumbnailResult.error);
+					}
+				} catch (error) {
+					console.warn('⚠️ Thumbnail upload error:', error);
+				}
+			}
+
 			// Create ad content document in Firestore
-			console.log('🔧 Step 2: Creating Firestore document...');
+			console.log('🔧 Step 3: Creating Firestore document...');
 			const videoData = {
 				title: title.trim(),
 				description: description.trim(),
@@ -154,6 +177,7 @@
 				ownerId: $user.uid,
 				ownerEmail: $user.email,
 				downloadURL: uploadResult.downloadURL,
+				thumbnailURL: thumbnailURL,
 				filePath: uploadResult.filePath,
 				fileName: uploadResult.fileName,
 				fileSize: uploadResult.size,

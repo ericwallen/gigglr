@@ -9,6 +9,7 @@ import { STORAGE } from '../firebase/config.client.js';
 
 export class StorageService {
     static FOLDER_NAME = 'Videos';
+    static THUMBNAILS_FOLDER = 'Thumbnails';
     
     static async uploadVideo(file, userId, onProgress = null) {
         try {
@@ -76,6 +77,52 @@ export class StorageService {
         }
     }
 
+    static async uploadThumbnail(thumbnailBlob, userId, videoFileName) {
+        try {
+            // Generate thumbnail filename based on video filename
+            const timestamp = Date.now();
+            const baseName = videoFileName.replace(/\.[^/.]+$/, ''); // Remove extension
+            const thumbnailFileName = `${baseName}_thumb.jpg`;
+            const thumbnailPath = `${this.THUMBNAILS_FOLDER}/${userId}/${thumbnailFileName}`;
+
+            console.log('🔧 Uploading thumbnail to:', thumbnailPath);
+
+            // Create storage reference
+            const storageRef = ref(STORAGE, thumbnailPath);
+
+            // Upload thumbnail
+            const uploadTask = uploadBytesResumable(storageRef, thumbnailBlob);
+
+            return new Promise((resolve, reject) => {
+                uploadTask.on('state_changed',
+                    null, // No progress tracking for thumbnails
+                    (error) => {
+                        console.error('Thumbnail upload error:', error);
+                        reject(error);
+                    },
+                    async () => {
+                        try {
+                            const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+                            console.log('✅ Thumbnail uploaded successfully:', downloadURL);
+                            resolve({
+                                success: true,
+                                downloadURL,
+                                filePath: thumbnailPath,
+                                fileName: thumbnailFileName
+                            });
+                        } catch (error) {
+                            console.error('Error getting thumbnail download URL:', error);
+                            reject(error);
+                        }
+                    }
+                );
+            });
+        } catch (error) {
+            console.error('Thumbnail upload error:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
     static async deleteVideo(filePath) {
         try {
             const storageRef = ref(STORAGE, filePath);
@@ -85,6 +132,50 @@ export class StorageService {
             console.error('Delete error:', error);
             return { success: false, error: error.message };
         }
+    }
+
+    static async deleteThumbnail(thumbnailURL) {
+        try {
+            if (!thumbnailURL) return { success: true }; // Nothing to delete
+
+            // Extract the path from the URL
+            const url = new URL(thumbnailURL);
+            const pathMatch = url.pathname.match(/\/o\/(.+)\?/);
+            if (!pathMatch) {
+                console.warn('Could not extract path from thumbnail URL:', thumbnailURL);
+                return { success: false, error: 'Invalid thumbnail URL format' };
+            }
+
+            const filePath = decodeURIComponent(pathMatch[1]);
+            const storageRef = ref(STORAGE, filePath);
+            await deleteObject(storageRef);
+            return { success: true };
+        } catch (error) {
+            console.error('Thumbnail delete error:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    static async deleteVideoWithThumbnail(videoFilePath, thumbnailURL) {
+        const results = {
+            video: { success: false },
+            thumbnail: { success: false }
+        };
+
+        // Delete video file
+        if (videoFilePath) {
+            results.video = await this.deleteVideo(videoFilePath);
+        }
+
+        // Delete thumbnail file
+        if (thumbnailURL) {
+            results.thumbnail = await this.deleteThumbnail(thumbnailURL);
+        }
+
+        return {
+            success: results.video.success && (results.thumbnail.success || !thumbnailURL),
+            results
+        };
     }
 
     static async getVideoMetadata(filePath) {

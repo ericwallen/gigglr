@@ -3,6 +3,7 @@
 	import { user } from '../../stores/auth.js';
 	import { ALL_TAGS, formatTag, searchTags } from '../../data/tags.js';
 	import TagSelector from '../tags/TagSelector.svelte';
+	import VideoThumbnail from './VideoThumbnail.svelte';
 
 	let { tv, onVideosUpdated } = $props();
 
@@ -80,6 +81,34 @@
 				video: videoMap.get(videoId),
 				index
 			})).filter(item => item.video); // Filter out videos that failed to load
+
+		// Check if any videos were invalid and clean up if needed
+		const originalCount = videosToLoad.length;
+		const validCount = playlistItems.length;
+
+		if (validCount < originalCount && tv?.id) {
+			console.log(`🧹 Found ${originalCount - validCount} invalid video references, cleaning up...`);
+
+			// Clean up invalid references
+			const cleanupResult = await TVService.cleanupTVVideoReferences(
+				tv.id,
+				videosToLoad
+			);
+
+			if (cleanupResult.success && cleanupResult.cleaned) {
+				console.log(`✅ Cleaned up ${cleanupResult.removedCount} invalid video references`);
+
+				// Update the callback with cleaned video IDs
+				if (onVideosUpdated) {
+					onVideosUpdated(cleanupResult.validVideoIds);
+				}
+
+				// Show user feedback
+				if (cleanupResult.removedCount > 0) {
+					console.log(`📢 Removed ${cleanupResult.removedCount} deleted video(s) from TV channel`);
+				}
+			}
+		}
 		} catch (err) {
 			console.error('Error loading current videos:', err);
 		} finally {
@@ -378,15 +407,47 @@
 	// Format duration
 	function formatDuration(seconds) {
 		if (!seconds) return 'Unknown';
-		
+
 		const hours = Math.floor(seconds / 3600);
 		const minutes = Math.floor((seconds % 3600) / 60);
 		const secs = Math.floor(seconds % 60);
-		
+
 		if (hours > 0) {
 			return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 		} else {
 			return `${minutes}:${secs.toString().padStart(2, '0')}`;
+		}
+	}
+
+	// Helper function to safely format video dates
+	function formatVideoDate(createdAt) {
+		try {
+			if (!createdAt) return 'Unknown date';
+
+			// Handle Firestore Timestamp objects
+			if (createdAt && typeof createdAt.toDate === 'function') {
+				return new Date(createdAt.toDate()).toLocaleDateString();
+			}
+
+			// Handle JavaScript Date objects
+			if (createdAt instanceof Date) {
+				return createdAt.toLocaleDateString();
+			}
+
+			// Handle string dates
+			if (typeof createdAt === 'string') {
+				return new Date(createdAt).toLocaleDateString();
+			}
+
+			// Handle timestamp numbers
+			if (typeof createdAt === 'number') {
+				return new Date(createdAt).toLocaleDateString();
+			}
+
+			return 'Unknown date';
+		} catch (error) {
+			console.warn('Error formatting date:', error);
+			return 'Unknown date';
 		}
 	}
 
@@ -479,10 +540,11 @@
 			<div class="video-grid">
 				{#each currentVideos as video}
 					<div class="video-card current">
+						<VideoThumbnail {video} size="small" />
 						<div class="video-info">
 							<h5>{video.title}</h5>
 							<p class="video-meta">
-								{formatDuration(video.duration)} • 
+								{formatDuration(video.duration)} •
 								{video.tags?.slice(0, 3).map(formatTag).join(', ')}
 								{#if video.tags?.length > 3}
 									+{video.tags.length - 3} more
@@ -562,6 +624,13 @@
 							<div class="playlist-number">
 								{index + 1}
 							</div>
+							{#if item.video}
+								<VideoThumbnail video={item.video} size="small" />
+							{:else}
+								<div class="playlist-thumbnail-placeholder">
+									<span>❓</span>
+								</div>
+							{/if}
 							<div class="playlist-video-info">
 								<h5>{item.video?.title || 'Unknown Video'}</h5>
 								<p class="playlist-meta">
@@ -630,6 +699,7 @@
 							{@const isAdded = currentVideoIds.has(video.id)}
 							{@const count = videoIdCounts.get(video.id) || 0}
 							<div class="video-card" class:added={isAdded}>
+								<VideoThumbnail {video} size="small" />
 								<div class="video-info">
 									<h5>{video.title}</h5>
 									<p class="video-meta">
@@ -793,6 +863,7 @@
 							{@const isAdded = currentVideoIds.has(video.id)}
 							{@const count = videoIdCounts.get(video.id) || 0}
 							<div class="video-card" class:added={isAdded}>
+								<VideoThumbnail {video} size="small" />
 								<div class="video-info">
 									<h5>{video.title}</h5>
 									<p class="video-meta">
@@ -807,7 +878,7 @@
 									</p>
 									<p class="video-stats">
 										{video.views || 0} views •
-										{new Date(video.createdAt.toDate()).toLocaleDateString()}
+										{formatVideoDate(video.createdAt)}
 									</p>
 								</div>
 								<div class="video-actions">
@@ -1082,7 +1153,7 @@
 		border-radius: 8px;
 		padding: 1rem;
 		display: flex;
-		justify-content: space-between;
+		gap: 1rem;
 		align-items: flex-start;
 		transition: all 0.2s;
 	}
@@ -1108,7 +1179,7 @@
 
 	.video-info {
 		flex: 1;
-		margin-right: 1rem;
+		min-width: 0;
 	}
 
 	.video-info h5 {
@@ -1298,6 +1369,19 @@
 		font-weight: 600;
 		color: #374151;
 		flex-shrink: 0;
+	}
+
+	.playlist-thumbnail-placeholder {
+		width: 64px;
+		height: 48px;
+		background: #f3f4f6;
+		border: 1px solid #e5e7eb;
+		border-radius: 4px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		font-size: 1.5rem;
 	}
 
 	.playlist-video-info {

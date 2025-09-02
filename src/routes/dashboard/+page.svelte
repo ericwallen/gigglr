@@ -2,9 +2,11 @@
 	import { onMount } from 'svelte';
 	import { user, isSubscribed, initAuth } from '$lib/stores/auth.js';
 	import { VideoService, TVService } from '$lib/services/database.js';
+	import { StorageService } from '$lib/services/storage.js';
 	import VideoUpload from '$lib/components/video/VideoUpload.svelte';
 	import TVManager from '$lib/components/tv/TVManager.svelte';
 	import VideoSelector from '$lib/components/video/VideoSelector.svelte';
+	import VideoThumbnail from '$lib/components/video/VideoThumbnail.svelte';
 
 	let loading = true;
 	let activeTab = 'overview';
@@ -15,12 +17,50 @@
 	let tvs = [];
 	let selectedTV = null;
 
+	// Delete state
+	let deletingVideoId = null;
+
+	// Cleanup state
+	let cleaningUpTVId = null;
+
 	// Stats
 	let stats = {
 		totalVideos: 0,
 		totalTVs: 0,
 		totalViews: 0
 	};
+
+	// Helper function to safely format video dates
+	function formatVideoDate(createdAt) {
+		try {
+			if (!createdAt) return 'Unknown date';
+
+			// Handle Firestore Timestamp objects
+			if (createdAt && typeof createdAt.toDate === 'function') {
+				return new Date(createdAt.toDate()).toLocaleDateString();
+			}
+
+			// Handle JavaScript Date objects
+			if (createdAt instanceof Date) {
+				return createdAt.toLocaleDateString();
+			}
+
+			// Handle string dates
+			if (typeof createdAt === 'string') {
+				return new Date(createdAt).toLocaleDateString();
+			}
+
+			// Handle timestamp numbers
+			if (typeof createdAt === 'number') {
+				return new Date(createdAt).toLocaleDateString();
+			}
+
+			return 'Unknown date';
+		} catch (error) {
+			console.warn('Error formatting date:', error);
+			return 'Unknown date';
+		}
+	}
 
 	async function loadDashboardData() {
 		if (!$user || !$isSubscribed) return;
@@ -90,6 +130,115 @@
 	function selectTVForVideoManagement(tv) {
 		selectedTV = tv;
 		activeTab = 'video-selection';
+	}
+
+	async function handleCleanupTV(tv) {
+		const confirmed = confirm(
+			`Clean up "${tv.name}"?\n\n` +
+			`This will remove any references to deleted videos from this TV channel. ` +
+			`This action is recommended if you've deleted videos that were in this TV.`
+		);
+
+		if (!confirmed) return;
+
+		cleaningUpTVId = tv.id;
+		error = '';
+
+		try {
+			console.log('🧹 Cleaning up TV:', tv.name);
+
+			const cleanupResult = await TVService.cleanupTVVideoReferences(
+				tv.id,
+				tv.videoIds || []
+			);
+
+			if (cleanupResult.success) {
+				if (cleanupResult.cleaned) {
+					console.log(`✅ Cleaned up ${cleanupResult.removedCount} invalid video references`);
+
+					// Update the TV in our local array
+					const tvIndex = tvs.findIndex(t => t.id === tv.id);
+					if (tvIndex !== -1) {
+						tvs[tvIndex] = {
+							...tvs[tvIndex],
+							videoIds: cleanupResult.validVideoIds
+						};
+					}
+
+					alert(`Successfully removed ${cleanupResult.removedCount} deleted video reference(s) from "${tv.name}".`);
+				} else {
+					alert(`"${tv.name}" is already clean - no deleted video references found.`);
+				}
+			} else {
+				throw new Error(cleanupResult.error);
+			}
+
+		} catch (err) {
+			console.error('❌ Error cleaning up TV:', err);
+			error = `Failed to clean up TV: ${err.message}`;
+		} finally {
+			cleaningUpTVId = null;
+		}
+	}
+
+	async function handleDeleteVideo(video) {
+		// Confirm deletion
+		const confirmed = confirm(
+			`Are you sure you want to delete "${video.title}"?\n\n` +
+			`This will permanently remove the video and its thumbnail from storage. ` +
+			`This action cannot be undone.`
+		);
+
+		if (!confirmed) return;
+
+		deletingVideoId = video.id;
+		error = '';
+
+		try {
+			console.log('🗑️ Deleting video:', video.title);
+
+			// Delete from Firestore and get file paths
+			const deleteResult = await VideoService.deleteVideoWithCleanup(video.id);
+
+			if (!deleteResult.success) {
+				throw new Error(deleteResult.error);
+			}
+
+			console.log('✅ Video document deleted from Firestore');
+
+			// Delete files from Storage
+			if (deleteResult.filePath || deleteResult.thumbnailURL) {
+				console.log('🗑️ Cleaning up storage files...');
+				const storageResult = await StorageService.deleteVideoWithThumbnail(
+					deleteResult.filePath,
+					deleteResult.thumbnailURL
+				);
+
+				if (!storageResult.success) {
+					console.warn('⚠️ Some storage files may not have been deleted:', storageResult.results);
+				} else {
+					console.log('✅ Storage files deleted successfully');
+				}
+			}
+
+			// Remove from local videos array
+			videos = videos.filter(v => v.id !== video.id);
+
+			// Update stats
+			stats = {
+				totalVideos: videos.length,
+				totalTVs: tvs.length,
+				totalViews: videos.reduce((sum, video) => sum + (video.views || 0), 0)
+			};
+
+			console.log('✅ Video deleted successfully');
+
+		} catch (err) {
+			console.error('❌ Error deleting video:', err);
+			error = `Failed to delete video: ${err.message}`;
+		} finally {
+			deletingVideoId = null;
+		}
 	}
 
 	onMount(() => {
@@ -184,39 +333,39 @@
 
 		<!-- Navigation Tabs -->
 		<div class="tab-nav">
-			<button 
-				class="tab-btn" 
+			<button
+				class="tab-btn"
 				class:active={activeTab === 'overview'}
-				on:click={() => activeTab = 'overview'}
+				onclick={() => activeTab = 'overview'}
 			>
 				Overview
 			</button>
-			<button 
-				class="tab-btn" 
+			<button
+				class="tab-btn"
 				class:active={activeTab === 'upload'}
-				on:click={() => activeTab = 'upload'}
+				onclick={() => activeTab = 'upload'}
 			>
 				Upload Video
 			</button>
-			<button 
-				class="tab-btn" 
+			<button
+				class="tab-btn"
 				class:active={activeTab === 'videos'}
-				on:click={() => activeTab = 'videos'}
+				onclick={() => activeTab = 'videos'}
 			>
 				My Videos
 			</button>
-			<button 
-				class="tab-btn" 
+			<button
+				class="tab-btn"
 				class:active={activeTab === 'tvs'}
-				on:click={() => activeTab = 'tvs'}
+				onclick={() => activeTab = 'tvs'}
 			>
 				My TVs
 			</button>
 			{#if selectedTV}
-				<button 
-					class="tab-btn" 
+				<button
+					class="tab-btn"
 					class:active={activeTab === 'video-selection'}
-					on:click={() => activeTab = 'video-selection'}
+					onclick={() => activeTab = 'video-selection'}
 				>
 					Manage "{selectedTV.name}"
 				</button>
@@ -229,12 +378,12 @@
 				<div class="overview-section">
 					<h2>Quick Actions</h2>
 					<div class="quick-actions">
-						<button class="action-card" on:click={() => activeTab = 'upload'}>
+						<button class="action-card" onclick={() => activeTab = 'upload'}>
 							<div class="action-icon">⬆️</div>
 							<h3>Upload Video</h3>
 							<p>Add new video content</p>
 						</button>
-						<button class="action-card" on:click={() => activeTab = 'tvs'}>
+						<button class="action-card" onclick={() => activeTab = 'tvs'}>
 							<div class="action-icon">➕</div>
 							<h3>Create TV</h3>
 							<p>Set up a new TV channel</p>
@@ -250,11 +399,23 @@
 									<p>{tv.videoIds?.length || 0} videos</p>
 									<div class="tv-actions">
 										<a href="/tv/{tv.slug}" target="_blank" class="btn small">View</a>
-										<button 
+										<button
 											class="btn small secondary"
-											on:click={() => selectTVForVideoManagement(tv)}
+											onclick={() => selectTVForVideoManagement(tv)}
 										>
 											Manage Videos
+										</button>
+										<button
+											class="btn small cleanup"
+											onclick={() => handleCleanupTV(tv)}
+											disabled={cleaningUpTVId === tv.id}
+											title="Remove references to deleted videos"
+										>
+											{#if cleaningUpTVId === tv.id}
+												🔄 Cleaning...
+											{:else}
+												🧹 Cleanup
+											{/if}
 										</button>
 									</div>
 								</div>
@@ -272,7 +433,7 @@
 					{:else if videos.length === 0}
 						<div class="empty-state">
 							<p>No videos uploaded yet.</p>
-							<button class="btn primary" on:click={() => activeTab = 'upload'}>
+							<button class="btn primary" onclick={() => activeTab = 'upload'}>
 								Upload Your First Video
 							</button>
 						</div>
@@ -280,17 +441,34 @@
 						<div class="video-grid">
 							{#each videos as video}
 								<div class="video-card">
-									<h4>{video.title}</h4>
-									<p class="video-meta">
-										{video.tags?.slice(0, 3).join(', ')}
-										{#if video.tags?.length > 3}
-											+{video.tags.length - 3} more
-										{/if}
-									</p>
-									<p class="video-stats">
-										{video.views || 0} views • 
-										{new Date(video.createdAt.toDate()).toLocaleDateString()}
-									</p>
+									<VideoThumbnail {video} size="medium" />
+									<div class="video-info">
+										<h4>{video.title}</h4>
+										<p class="video-meta">
+											{video.tags?.slice(0, 3).join(', ')}
+											{#if video.tags?.length > 3}
+												+{video.tags.length - 3} more
+											{/if}
+										</p>
+										<p class="video-stats">
+											{video.views || 0} views •
+											{formatVideoDate(video.createdAt)}
+										</p>
+									</div>
+									<div class="video-actions">
+										<button
+											class="delete-btn"
+											onclick={() => handleDeleteVideo(video)}
+											disabled={deletingVideoId === video.id}
+											title="Delete video permanently"
+										>
+											{#if deletingVideoId === video.id}
+												🔄 Deleting...
+											{:else}
+												🗑️ Delete
+											{/if}
+										</button>
+									</div>
 								</div>
 							{/each}
 						</div>
@@ -310,9 +488,9 @@
 						<p>Select a TV to manage its video content:</p>
 						<div class="tv-selection-grid">
 							{#each tvs as tv}
-								<button 
+								<button
 									class="tv-selection-card"
-									on:click={() => selectTVForVideoManagement(tv)}
+									onclick={() => selectTVForVideoManagement(tv)}
 								>
 									<h4>{tv.name}</h4>
 									<p>{tv.videoIds?.length || 0} videos</p>
@@ -598,14 +776,75 @@
 		background: white;
 		border: 1px solid #e5e7eb;
 		border-radius: 8px;
-		padding: 1.5rem;
+		padding: 1rem;
+		display: flex;
+		gap: 1rem;
+		align-items: flex-start;
 	}
 
-	.video-card h4 {
+	.video-info {
+		flex: 1;
+		min-width: 0; /* Allow text to truncate */
+	}
+
+	.video-actions {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		flex-shrink: 0;
+	}
+
+	.delete-btn {
+		background: #dc2626;
+		color: white;
+		border: none;
+		border-radius: 6px;
+		padding: 0.5rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: all 0.2s;
+		white-space: nowrap;
+	}
+
+	.delete-btn:hover:not(:disabled) {
+		background: #b91c1c;
+		transform: translateY(-1px);
+	}
+
+	.delete-btn:disabled {
+		background: #9ca3af;
+		cursor: not-allowed;
+		transform: none;
+	}
+
+	.delete-btn:active {
+		transform: translateY(0);
+	}
+
+	.btn.cleanup {
+		background: #f59e0b;
+		color: white;
+		border: 1px solid #d97706;
+	}
+
+	.btn.cleanup:hover:not(:disabled) {
+		background: #d97706;
+		border-color: #b45309;
+	}
+
+	.btn.cleanup:disabled {
+		background: #9ca3af;
+		border-color: #6b7280;
+		cursor: not-allowed;
+	}
+
+	.video-info h4 {
 		font-size: 1.125rem;
 		font-weight: 600;
 		color: #1f2937;
 		margin: 0 0 0.5rem 0;
+		line-height: 1.3;
 	}
 
 	.video-meta {

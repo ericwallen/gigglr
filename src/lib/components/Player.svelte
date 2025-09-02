@@ -12,6 +12,7 @@
 
 	let currentVideoIndex = $state(0);
 	let videoElement;
+	let preloadVideoElement;
 	let containerElement;
 	let isPlaying = $state(false);
 	let showControls = $state(false);
@@ -21,6 +22,8 @@
 	let reducedMotion = $state(false);
 	let isMuted = $state(true);
 	let volume = $state(0.7);
+	let nextVideoIndex = $state(1);
+	let isPortraitVideo = $state(false);
 
 	// Detect Raspberry Pi environment
 	function detectRaspberryPi() {
@@ -41,19 +44,51 @@
 		);
 	}
 
-	// Play next video in sequence
+	// Update next video index when current video changes
+	function updateNextVideoIndex() {
+		nextVideoIndex = (currentVideoIndex + 1) % videoUrls.length;
+	}
+
+	// Check if current video is portrait (taller than wide)
+	function checkVideoAspectRatio() {
+		if (videoElement && videoElement.videoWidth && videoElement.videoHeight) {
+			const aspectRatio = videoElement.videoWidth / videoElement.videoHeight;
+			isPortraitVideo = aspectRatio < 1; // Portrait if width < height
+			console.log(`📐 Video aspect ratio: ${aspectRatio.toFixed(2)} (${isPortraitVideo ? 'Portrait' : 'Landscape'})`);
+		}
+	}
+
+	// Preload the next video
+	function preloadNextVideo() {
+		if (preloadVideoElement && videoUrls[nextVideoIndex]) {
+			preloadVideoElement.src = videoUrls[nextVideoIndex];
+			preloadVideoElement.load();
+			console.log('🔄 Preloading next video:', nextVideoIndex + 1);
+		}
+	}
+
+	// Play next video in sequence with seamless transition
 	function playNextVideo() {
 		currentVideoIndex = (currentVideoIndex + 1) % videoUrls.length;
+		updateNextVideoIndex();
+
+		// Reset aspect ratio state when changing videos
+		isPortraitVideo = false;
+
 		if (videoElement) {
 			// For Raspberry Pi, add a small delay to prevent overload
 			if (isRaspberryPi) {
 				setTimeout(() => {
 					videoElement.load();
 					videoElement.play().catch(console.error);
+					// Preload the next video after current starts playing
+					setTimeout(preloadNextVideo, 1000);
 				}, 500);
 			} else {
 				videoElement.load();
 				videoElement.play().catch(console.error);
+				// Preload the next video after current starts playing
+				setTimeout(preloadNextVideo, 500);
 			}
 		}
 	}
@@ -151,9 +186,14 @@
 			case 'ArrowLeft':
 				event.preventDefault();
 				currentVideoIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
+				updateNextVideoIndex();
+				// Reset aspect ratio state when changing videos
+				isPortraitVideo = false;
 				if (videoElement) {
 					videoElement.load();
 					videoElement.play().catch(console.error);
+					// Preload the next video after current starts playing
+					setTimeout(preloadNextVideo, 500);
 				}
 				break;
 			case 'f':
@@ -189,6 +229,9 @@
 		isRaspberryPi = detectRaspberryPi();
 		reducedMotion = isRaspberryPi || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+		// Initialize next video index
+		updateNextVideoIndex();
+
 		// Apply Raspberry Pi optimizations
 		if (isRaspberryPi && videoElement) {
 			// Reduce video quality for better performance
@@ -203,9 +246,13 @@
 			if (isRaspberryPi) {
 				setTimeout(() => {
 					videoElement.play().catch(console.error);
+					// Start preloading after first video starts
+					setTimeout(preloadNextVideo, 2000);
 				}, 1000);
 			} else {
 				videoElement.play().catch(console.error);
+				// Start preloading after first video starts
+				setTimeout(preloadNextVideo, 1000);
 			}
 		}
 
@@ -252,10 +299,16 @@
 		src={videoUrls[currentVideoIndex]}
 		onended={handleVideoEnd}
 		onerror={handleVideoError}
-		onplay={() => isPlaying = true}
+		onplay={() => {
+			isPlaying = true;
+			// Fallback aspect ratio check when video starts playing
+			setTimeout(checkVideoAspectRatio, 100);
+		}}
 		onpause={() => isPlaying = false}
+		onloadedmetadata={checkVideoAspectRatio}
 		class="tv-video"
 		class:pi-optimized={isRaspberryPi}
+		class:portrait={isPortraitVideo}
 		preload={isRaspberryPi ? "metadata" : "auto"}
 		autoplay
 		playsinline
@@ -266,6 +319,15 @@
 		<track kind="captions" />
 		Your browser does not support the video tag.
 	</video>
+
+	<!-- Hidden video element for preloading next video -->
+	<video
+		bind:this={preloadVideoElement}
+		class="preload-video"
+		preload="auto"
+		muted
+		style="display: none;"
+	></video>
 
 	<!-- Video Controls Overlay -->
 	<div class="controls-overlay" class:visible={showControls}>
@@ -295,9 +357,14 @@
 				<div class="playback-controls">
 					<button class="control-btn small" onclick={() => {
 						currentVideoIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
+						updateNextVideoIndex();
+						// Reset aspect ratio state when changing videos
+						isPortraitVideo = false;
 						if (videoElement) {
 							videoElement.load();
 							videoElement.play().catch(console.error);
+							// Preload the next video after current starts playing
+							setTimeout(preloadNextVideo, 500);
 						}
 					}} aria-label="Previous video">
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -431,11 +498,16 @@
 		left: 0;
 		width: 100%;
 		height: 100%;
-		object-fit: cover;
+		object-fit: cover; /* Default for landscape videos - fills screen */
 		/* Hardware acceleration for better performance */
 		transform: translateZ(0);
 		backface-visibility: hidden;
 		-webkit-backface-visibility: hidden;
+	}
+
+	/* Portrait video handling - center with black bars */
+	.tv-video.portrait {
+		object-fit: contain; /* Maintain aspect ratio, don't crop */
 	}
 
 	/* Raspberry Pi specific optimizations */
