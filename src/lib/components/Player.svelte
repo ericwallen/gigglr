@@ -24,6 +24,7 @@
 	let volume = $state(0.7);
 	let nextVideoIndex = $state(1);
 	let isPortraitVideo = $state(false);
+	let videoReady = $state(false);
 
 	// Detect Raspberry Pi environment
 	function detectRaspberryPi() {
@@ -58,6 +59,18 @@
 		}
 	}
 
+	// Handle video ready state to prevent flicker
+	function handleVideoReady() {
+		videoReady = true;
+		console.log('🎬 Video ready for display');
+	}
+
+	// Reset video ready state when changing videos
+	function resetVideoReady() {
+		videoReady = false;
+		console.log('🔄 Resetting video ready state');
+	}
+
 	// Preload the next video
 	function preloadNextVideo() {
 		if (preloadVideoElement && videoUrls[nextVideoIndex]) {
@@ -72,8 +85,9 @@
 		currentVideoIndex = (currentVideoIndex + 1) % videoUrls.length;
 		updateNextVideoIndex();
 
-		// Reset aspect ratio state when changing videos
+		// Reset states when changing videos
 		isPortraitVideo = false;
+		resetVideoReady();
 
 		if (videoElement) {
 			// For Raspberry Pi, add a small delay to prevent overload
@@ -187,8 +201,9 @@
 				event.preventDefault();
 				currentVideoIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
 				updateNextVideoIndex();
-				// Reset aspect ratio state when changing videos
+				// Reset states when changing videos
 				isPortraitVideo = false;
+				resetVideoReady();
 				if (videoElement) {
 					videoElement.load();
 					videoElement.play().catch(console.error);
@@ -231,6 +246,9 @@
 
 		// Initialize next video index
 		updateNextVideoIndex();
+
+		// Reset video ready state for initial load
+		resetVideoReady();
 
 		// Apply Raspberry Pi optimizations
 		if (isRaspberryPi && videoElement) {
@@ -305,10 +323,22 @@
 			setTimeout(checkVideoAspectRatio, 100);
 		}}
 		onpause={() => isPlaying = false}
-		onloadedmetadata={checkVideoAspectRatio}
+		onloadedmetadata={() => {
+			checkVideoAspectRatio();
+			// Video metadata is loaded, but wait for first frame
+		}}
+		onloadeddata={() => {
+			// First frame is loaded and ready to display
+			handleVideoReady();
+		}}
+		oncanplay={() => {
+			// Video can start playing - additional safety for readiness
+			if (!videoReady) handleVideoReady();
+		}}
 		class="tv-video"
 		class:pi-optimized={isRaspberryPi}
 		class:portrait={isPortraitVideo}
+		class:ready={videoReady}
 		preload={isRaspberryPi ? "metadata" : "auto"}
 		autoplay
 		playsinline
@@ -358,8 +388,9 @@
 					<button class="control-btn small" onclick={() => {
 						currentVideoIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
 						updateNextVideoIndex();
-						// Reset aspect ratio state when changing videos
+						// Reset states when changing videos
 						isPortraitVideo = false;
+						resetVideoReady();
 						if (videoElement) {
 							videoElement.load();
 							videoElement.play().catch(console.error);
@@ -503,6 +534,14 @@
 		transform: translateZ(0);
 		backface-visibility: hidden;
 		-webkit-backface-visibility: hidden;
+		/* Hide video until ready to prevent flicker */
+		opacity: 0;
+		transition: opacity 0.2s ease-in-out;
+	}
+
+	/* Show video when ready */
+	.tv-video.ready {
+		opacity: 1;
 	}
 
 	/* Portrait video handling - center with black bars */
@@ -521,6 +560,13 @@
 		/* Reduce quality for performance */
 		image-rendering: optimizeSpeed;
 		image-rendering: -webkit-optimize-contrast;
+		/* Faster transition for Pi to reduce flicker */
+		transition: opacity 0.1s ease-out;
+	}
+
+	/* Even faster transition when Pi is ready */
+	.tv-video.pi-optimized.ready {
+		transition: opacity 0.05s ease-out;
 	}
 
 	/* Full-width mode overrides - extremely aggressive */
