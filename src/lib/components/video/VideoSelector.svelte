@@ -41,8 +41,10 @@
 	// Load current videos and calculate counts
 	async function loadCurrentVideos(videoIds = null) {
 		const videosToLoad = videoIds || tv?.videoIds || [];
+		console.log('🔄 Loading current videos for TV:', tv?.name, 'Video IDs:', videosToLoad);
 
 		if (!videosToLoad.length) {
+			console.log('📭 No video IDs found for TV');
 			currentVideos = [];
 			currentVideoIds = new Set();
 			videoIdCounts = new Map();
@@ -62,8 +64,11 @@
 
 			// Load unique videos
 			const uniqueVideoIds = [...new Set(videosToLoad)];
+			console.log('📦 Loading unique videos:', uniqueVideoIds);
 			const videoPromises = uniqueVideoIds.map(id => VideoService.getVideo(id));
 			const results = await Promise.all(videoPromises);
+
+			console.log('📊 Video loading results:', results);
 
 			const videoMap = new Map();
 			results
@@ -73,6 +78,7 @@
 				});
 
 			currentVideos = Array.from(videoMap.values());
+			console.log('✅ Successfully loaded videos:', currentVideos.length);
 
 			// Build playlist items with order
 			playlistItems = videosToLoad.map((videoId, index) => ({
@@ -82,33 +88,35 @@
 				index
 			})).filter(item => item.video); // Filter out videos that failed to load
 
-		// Check if any videos were invalid and clean up if needed
-		const originalCount = videosToLoad.length;
-		const validCount = playlistItems.length;
+			console.log('📋 Final playlist items:', playlistItems.length);
 
-		if (validCount < originalCount && tv?.id) {
-			console.log(`🧹 Found ${originalCount - validCount} invalid video references, cleaning up...`);
+		// TEMPORARILY DISABLED: Check if any videos were invalid and clean up if needed
+		// const originalCount = videosToLoad.length;
+		// const validCount = playlistItems.length;
 
-			// Clean up invalid references
-			const cleanupResult = await TVService.cleanupTVVideoReferences(
-				tv.id,
-				videosToLoad
-			);
-
-			if (cleanupResult.success && cleanupResult.cleaned) {
-				console.log(`✅ Cleaned up ${cleanupResult.removedCount} invalid video references`);
-
-				// Update the callback with cleaned video IDs
-				if (onVideosUpdated) {
-					onVideosUpdated(cleanupResult.validVideoIds);
-				}
-
-				// Show user feedback
-				if (cleanupResult.removedCount > 0) {
-					console.log(`📢 Removed ${cleanupResult.removedCount} deleted video(s) from TV channel`);
-				}
-			}
-		}
+		// if (validCount < originalCount && tv?.id) {
+		// 	console.log(`🧹 Found ${originalCount - validCount} invalid video references, cleaning up...`);
+		//
+		// 	// Clean up invalid references
+		// 	const cleanupResult = await TVService.cleanupTVVideoReferences(
+		// 		tv.id,
+		// 		videosToLoad
+		// 	);
+		//
+		// 	if (cleanupResult.success && cleanupResult.cleaned) {
+		// 		console.log(`✅ Cleaned up ${cleanupResult.removedCount} invalid video references`);
+		//
+		// 		// Update the callback with cleaned video IDs
+		// 		if (onVideosUpdated) {
+		// 			onVideosUpdated(cleanupResult.validVideoIds);
+		// 		}
+		//
+		// 		// Show user feedback
+		// 		if (cleanupResult.removedCount > 0) {
+		// 			console.log(`📢 Removed ${cleanupResult.removedCount} deleted video(s) from TV channel`);
+		// 		}
+		// 	}
+		// }
 		} catch (err) {
 			console.error('Error loading current videos:', err);
 		} finally {

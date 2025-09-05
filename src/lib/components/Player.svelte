@@ -251,9 +251,6 @@
 		// Initialize next video index
 		updateNextVideoIndex();
 
-		// Reset video ready state for initial load
-		resetVideoReady();
-
 		// Apply Raspberry Pi optimizations
 		if (isRaspberryPi && videoElement) {
 			// Reduce video quality for better performance
