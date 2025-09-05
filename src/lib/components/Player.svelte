@@ -24,7 +24,6 @@
 	let volume = $state(0.7);
 	let nextVideoIndex = $state(1);
 	let isPortraitVideo = $state(false);
-	let videoLoading = $state(false);
 
 	// Detect Raspberry Pi environment
 	function detectRaspberryPi() {
@@ -59,20 +58,7 @@
 		}
 	}
 
-	// Simple approach: just track when we're changing videos
-	function startVideoTransition() {
-		videoLoading = true;
-		console.log('🔄 Starting video transition');
-	}
 
-	function endVideoTransition() {
-		// Small delay for embedded devices
-		const delay = isRaspberryPi ? 200 : 50;
-		setTimeout(() => {
-			videoLoading = false;
-			console.log('✅ Video transition complete');
-		}, delay);
-	}
 
 	// Preload the next video
 	function preloadNextVideo() {
@@ -85,8 +71,6 @@
 
 	// Play next video in sequence with seamless transition
 	function playNextVideo() {
-		startVideoTransition();
-
 		currentVideoIndex = (currentVideoIndex + 1) % videoUrls.length;
 		updateNextVideoIndex();
 
@@ -94,6 +78,9 @@
 		isPortraitVideo = false;
 
 		if (videoElement) {
+			// Add black background immediately to prevent flicker
+			videoElement.style.visibility = 'hidden';
+
 			// For Raspberry Pi, add a small delay to prevent overload
 			if (isRaspberryPi) {
 				setTimeout(() => {
@@ -203,12 +190,13 @@
 				break;
 			case 'ArrowLeft':
 				event.preventDefault();
-				startVideoTransition();
 				currentVideoIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
 				updateNextVideoIndex();
 				// Reset aspect ratio state when changing videos
 				isPortraitVideo = false;
 				if (videoElement) {
+					// Hide video immediately to prevent flicker
+					videoElement.style.visibility = 'hidden';
 					videoElement.load();
 					videoElement.play().catch(console.error);
 					// Preload the next video after current starts playing
@@ -328,13 +316,18 @@
 			checkVideoAspectRatio();
 		}}
 		oncanplaythrough={() => {
-			// Video can play through without buffering - good time to show it
-			endVideoTransition();
+			// Video can play through without buffering - show it
+			if (videoElement) {
+				// Small delay for embedded devices to ensure smooth playback
+				const delay = isRaspberryPi ? 300 : 100;
+				setTimeout(() => {
+					videoElement.style.visibility = 'visible';
+				}, delay);
+			}
 		}}
 		class="tv-video"
 		class:pi-optimized={isRaspberryPi}
 		class:portrait={isPortraitVideo}
-		class:loading={videoLoading}
 		preload={isRaspberryPi ? "metadata" : "auto"}
 		autoplay
 		playsinline
@@ -346,10 +339,7 @@
 		Your browser does not support the video tag.
 	</video>
 
-	<!-- Black screen overlay to prevent flicker during transitions -->
-	{#if videoLoading}
-		<div class="black-screen-overlay"></div>
-	{/if}
+
 
 	<!-- Hidden video element for preloading next video -->
 	<video
@@ -387,12 +377,13 @@
 			<div class="bottom-controls">
 				<div class="playback-controls">
 					<button class="control-btn small" onclick={() => {
-						startVideoTransition();
 						currentVideoIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
 						updateNextVideoIndex();
 						// Reset aspect ratio state when changing videos
 						isPortraitVideo = false;
 						if (videoElement) {
+							// Hide video immediately to prevent flicker
+							videoElement.style.visibility = 'hidden';
 							videoElement.load();
 							videoElement.play().catch(console.error);
 							// Preload the next video after current starts playing
@@ -537,10 +528,7 @@
 		-webkit-backface-visibility: hidden;
 	}
 
-	/* Hide video during loading transitions */
-	.tv-video.loading {
-		opacity: 0;
-	}
+
 
 	/* Portrait video handling - center with black bars */
 	.tv-video.portrait {
@@ -562,17 +550,7 @@
 		transition: opacity 0.1s ease-out;
 	}
 
-	/* Black screen overlay to prevent flicker */
-	.black-screen-overlay {
-		position: absolute;
-		top: 0;
-		left: 0;
-		width: 100%;
-		height: 100%;
-		background: #000;
-		z-index: 10;
-		pointer-events: none;
-	}
+
 
 	/* Full-width mode overrides - extremely aggressive */
 	.tv-wrapper.full-width {
