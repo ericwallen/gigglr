@@ -24,6 +24,8 @@
 	let volume = $state(0.7);
 	let nextVideoIndex = $state(1);
 	let isPortraitVideo = $state(false);
+	let lastVideoChangeTime = 0;
+	let isChangingVideo = $state(false);
 
 	// Detect Raspberry Pi environment
 	function detectRaspberryPi() {
@@ -58,6 +60,51 @@
 		}
 	}
 
+	// Change video with minimum timeout to prevent rapid transitions
+	function changeVideoWithTimeout(newIndex) {
+		if (isChangingVideo) {
+			console.log('🚫 Video change already in progress, ignoring');
+			return;
+		}
+
+		const now = Date.now();
+		const timeSinceLastChange = now - lastVideoChangeTime;
+		const minInterval = isRaspberryPi ? 2000 : 1000; // 2s for Pi, 1s for others
+
+		if (timeSinceLastChange < minInterval) {
+			const remainingTime = minInterval - timeSinceLastChange;
+			console.log(`⏱️ Waiting ${remainingTime}ms before next video change`);
+			setTimeout(() => changeVideoWithTimeout(newIndex), remainingTime);
+			return;
+		}
+
+		isChangingVideo = true;
+		lastVideoChangeTime = now;
+
+		console.log(`🔄 Changing to video ${newIndex} (was ${currentVideoIndex})`);
+
+		currentVideoIndex = newIndex;
+		updateNextVideoIndex();
+		isPortraitVideo = false;
+
+		if (videoElement) {
+			// Hide video during transition
+			videoElement.style.visibility = 'hidden';
+
+			// Load and play new video
+			videoElement.load();
+			videoElement.play().catch(console.error);
+
+			// Preload next video after current starts playing
+			setTimeout(preloadNextVideo, 1000);
+		}
+
+		// Reset changing flag after transition
+		setTimeout(() => {
+			isChangingVideo = false;
+		}, 500);
+	}
+
 
 
 	// Preload the next video
@@ -69,33 +116,10 @@
 		}
 	}
 
-	// Play next video in sequence with seamless transition
+	// Play next video in sequence with minimum timeout
 	function playNextVideo() {
-		currentVideoIndex = (currentVideoIndex + 1) % videoUrls.length;
-		updateNextVideoIndex();
-
-		// Reset aspect ratio state when changing videos
-		isPortraitVideo = false;
-
-		if (videoElement) {
-			// Add black background immediately to prevent flicker
-			videoElement.style.visibility = 'hidden';
-
-			// For Raspberry Pi, add a small delay to prevent overload
-			if (isRaspberryPi) {
-				setTimeout(() => {
-					videoElement.load();
-					videoElement.play().catch(console.error);
-					// Preload the next video after current starts playing
-					setTimeout(preloadNextVideo, 1000);
-				}, 500);
-			} else {
-				videoElement.load();
-				videoElement.play().catch(console.error);
-				// Preload the next video after current starts playing
-				setTimeout(preloadNextVideo, 500);
-			}
-		}
+		const nextIndex = (currentVideoIndex + 1) % videoUrls.length;
+		changeVideoWithTimeout(nextIndex);
 	}
 
 	// Handle video end - automatically play next
@@ -190,18 +214,8 @@
 				break;
 			case 'ArrowLeft':
 				event.preventDefault();
-				currentVideoIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
-				updateNextVideoIndex();
-				// Reset aspect ratio state when changing videos
-				isPortraitVideo = false;
-				if (videoElement) {
-					// Hide video immediately to prevent flicker
-					videoElement.style.visibility = 'hidden';
-					videoElement.load();
-					videoElement.play().catch(console.error);
-					// Preload the next video after current starts playing
-					setTimeout(preloadNextVideo, 500);
-				}
+				const prevIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
+				changeVideoWithTimeout(prevIndex);
 				break;
 			case 'f':
 			case 'F11':
@@ -377,18 +391,8 @@
 			<div class="bottom-controls">
 				<div class="playback-controls">
 					<button class="control-btn small" onclick={() => {
-						currentVideoIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
-						updateNextVideoIndex();
-						// Reset aspect ratio state when changing videos
-						isPortraitVideo = false;
-						if (videoElement) {
-							// Hide video immediately to prevent flicker
-							videoElement.style.visibility = 'hidden';
-							videoElement.load();
-							videoElement.play().catch(console.error);
-							// Preload the next video after current starts playing
-							setTimeout(preloadNextVideo, 500);
-						}
+						const prevIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
+						changeVideoWithTimeout(prevIndex);
 					}} aria-label="Previous video">
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
 							<path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
