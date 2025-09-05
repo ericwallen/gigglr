@@ -24,10 +24,7 @@
 	let volume = $state(0.7);
 	let nextVideoIndex = $state(1);
 	let isPortraitVideo = $state(false);
-	let videoReady = $state(false);
-	let showBlackScreen = $state(true);
-	let videoReadyTimeout = null;
-	let fallbackTimeout = null;
+	let videoLoading = $state(false);
 
 	// Detect Raspberry Pi environment
 	function detectRaspberryPi() {
@@ -62,61 +59,19 @@
 		}
 	}
 
-	// Handle video ready state to prevent flicker
-	function handleVideoReady() {
-		// Clear any existing timeouts
-		if (videoReadyTimeout) {
-			clearTimeout(videoReadyTimeout);
-			videoReadyTimeout = null;
-		}
-
-		// Only proceed if we're not already ready (prevent double-calls)
-		if (videoReady) {
-			console.log('🎬 Video already ready, skipping');
-			return;
-		}
-
-		// Add extra delay for embedded devices to ensure smooth playback
-		const delay = isRaspberryPi ? 400 : 150;
-
-		console.log(`🎬 Video ready event triggered, showing in ${delay}ms`);
-		videoReadyTimeout = setTimeout(() => {
-			videoReady = true;
-			showBlackScreen = false;
-			console.log('✅ Video now visible');
-			videoReadyTimeout = null;
-		}, delay);
+	// Simple approach: just track when we're changing videos
+	function startVideoTransition() {
+		videoLoading = true;
+		console.log('🔄 Starting video transition');
 	}
 
-	// Reset video ready state when changing videos
-	function resetVideoReady() {
-		console.log('🔄 Resetting video ready state');
-
-		// Clear any existing timeouts
-		if (videoReadyTimeout) {
-			clearTimeout(videoReadyTimeout);
-			videoReadyTimeout = null;
-		}
-		if (fallbackTimeout) {
-			clearTimeout(fallbackTimeout);
-			fallbackTimeout = null;
-		}
-
-		// Reset states
-		videoReady = false;
-		showBlackScreen = true;
-
-		// Fallback timeout to ensure black screen doesn't stay forever
-		const fallbackDelay = isRaspberryPi ? 4000 : 3000;
-		console.log(`⏰ Setting fallback timeout for ${fallbackDelay}ms`);
-		fallbackTimeout = setTimeout(() => {
-			if (!videoReady) {
-				console.log('⚠️ Fallback: Forcing video display after timeout');
-				videoReady = true;
-				showBlackScreen = false;
-			}
-			fallbackTimeout = null;
-		}, fallbackDelay);
+	function endVideoTransition() {
+		// Small delay for embedded devices
+		const delay = isRaspberryPi ? 200 : 50;
+		setTimeout(() => {
+			videoLoading = false;
+			console.log('✅ Video transition complete');
+		}, delay);
 	}
 
 	// Preload the next video
@@ -130,30 +85,24 @@
 
 	// Play next video in sequence with seamless transition
 	function playNextVideo() {
-		console.log(`🔄 Playing next video: ${currentVideoIndex} -> ${(currentVideoIndex + 1) % videoUrls.length}`);
+		startVideoTransition();
 
 		currentVideoIndex = (currentVideoIndex + 1) % videoUrls.length;
 		updateNextVideoIndex();
 
-		// Reset states when changing videos - do this BEFORE loading new video
+		// Reset aspect ratio state when changing videos
 		isPortraitVideo = false;
-		resetVideoReady();
 
 		if (videoElement) {
-			// Force a more aggressive reset for embedded devices
+			// For Raspberry Pi, add a small delay to prevent overload
 			if (isRaspberryPi) {
-				// Pause current video first
-				videoElement.pause();
-
 				setTimeout(() => {
-					console.log('🥧 Pi: Loading new video with delay');
 					videoElement.load();
 					videoElement.play().catch(console.error);
 					// Preload the next video after current starts playing
-					setTimeout(preloadNextVideo, 1500);
-				}, 700); // Longer delay for Pi
+					setTimeout(preloadNextVideo, 1000);
+				}, 500);
 			} else {
-				console.log('💻 Desktop: Loading new video');
 				videoElement.load();
 				videoElement.play().catch(console.error);
 				// Preload the next video after current starts playing
@@ -254,25 +203,16 @@
 				break;
 			case 'ArrowLeft':
 				event.preventDefault();
-				console.log('⬅️ Previous video via keyboard');
+				startVideoTransition();
 				currentVideoIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
 				updateNextVideoIndex();
-				// Reset states when changing videos
+				// Reset aspect ratio state when changing videos
 				isPortraitVideo = false;
-				resetVideoReady();
 				if (videoElement) {
-					if (isRaspberryPi) {
-						videoElement.pause();
-						setTimeout(() => {
-							videoElement.load();
-							videoElement.play().catch(console.error);
-							setTimeout(preloadNextVideo, 1500);
-						}, 700);
-					} else {
-						videoElement.load();
-						videoElement.play().catch(console.error);
-						setTimeout(preloadNextVideo, 500);
-					}
+					videoElement.load();
+					videoElement.play().catch(console.error);
+					// Preload the next video after current starts playing
+					setTimeout(preloadNextVideo, 500);
 				}
 				break;
 			case 'f':
@@ -354,16 +294,6 @@
 			window.removeEventListener('keydown', handleKeydown);
 			document.removeEventListener('fullscreenchange', handleFullscreenChange);
 			clearTimeout(controlsTimeout);
-
-			// Clean up video ready timeouts
-			if (videoReadyTimeout) {
-				clearTimeout(videoReadyTimeout);
-				videoReadyTimeout = null;
-			}
-			if (fallbackTimeout) {
-				clearTimeout(fallbackTimeout);
-				fallbackTimeout = null;
-			}
 		};
 	});
 </script>
@@ -397,49 +327,17 @@
 			setTimeout(checkVideoAspectRatio, 100);
 		}}
 		onpause={() => isPlaying = false}
-		onloadstart={() => {
-			// Video starts loading - ensure we're in reset state
-			console.log('📥 Video load started');
-			if (videoReady) {
-				console.log('🔄 Force resetting video state on load start');
-				resetVideoReady();
-			}
-		}}
 		onloadedmetadata={() => {
 			checkVideoAspectRatio();
-			console.log('📊 Video metadata loaded');
-			// Video metadata is loaded, but wait for first frame
 		}}
-		onloadeddata={() => {
-			console.log('📦 Video data loaded (first frame available)');
-			// First frame is loaded - wait for playing event for embedded devices
-			if (!isRaspberryPi) {
-				console.log('💻 Desktop/mobile: triggering ready from loadeddata');
-				handleVideoReady();
-			} else {
-				console.log('🥧 Pi: waiting for playing event');
-			}
-		}}
-		oncanplay={() => {
-			console.log('▶️ Video can play');
-			// Video can start playing - for Pi, wait for actual playback
-			if (!isRaspberryPi && !videoReady) {
-				console.log('💻 Desktop/mobile: triggering ready from canplay');
-				handleVideoReady();
-			}
-		}}
-		onplaying={() => {
-			console.log('🎬 Video is playing');
-			// Video is actually playing - safest point for embedded devices
-			if (isRaspberryPi || !videoReady) {
-				console.log('🥧 Pi or not ready: triggering ready from playing');
-				handleVideoReady();
-			}
+		oncanplaythrough={() => {
+			// Video can play through without buffering - good time to show it
+			endVideoTransition();
 		}}
 		class="tv-video"
 		class:pi-optimized={isRaspberryPi}
 		class:portrait={isPortraitVideo}
-		class:ready={videoReady}
+		class:loading={videoLoading}
 		preload={isRaspberryPi ? "metadata" : "auto"}
 		autoplay
 		playsinline
@@ -451,9 +349,9 @@
 		Your browser does not support the video tag.
 	</video>
 
-	<!-- Black screen overlay to prevent flicker -->
-	{#if showBlackScreen}
-		<div class="black-screen-overlay" class:pi-optimized={isRaspberryPi}></div>
+	<!-- Black screen overlay to prevent flicker during transitions -->
+	{#if videoLoading}
+		<div class="black-screen-overlay"></div>
 	{/if}
 
 	<!-- Hidden video element for preloading next video -->
@@ -492,25 +390,16 @@
 			<div class="bottom-controls">
 				<div class="playback-controls">
 					<button class="control-btn small" onclick={() => {
-						console.log('⬅️ Previous video via button');
+						startVideoTransition();
 						currentVideoIndex = currentVideoIndex === 0 ? videoUrls.length - 1 : currentVideoIndex - 1;
 						updateNextVideoIndex();
-						// Reset states when changing videos
+						// Reset aspect ratio state when changing videos
 						isPortraitVideo = false;
-						resetVideoReady();
 						if (videoElement) {
-							if (isRaspberryPi) {
-								videoElement.pause();
-								setTimeout(() => {
-									videoElement.load();
-									videoElement.play().catch(console.error);
-									setTimeout(preloadNextVideo, 1500);
-								}, 700);
-							} else {
-								videoElement.load();
-								videoElement.play().catch(console.error);
-								setTimeout(preloadNextVideo, 500);
-							}
+							videoElement.load();
+							videoElement.play().catch(console.error);
+							// Preload the next video after current starts playing
+							setTimeout(preloadNextVideo, 500);
 						}
 					}} aria-label="Previous video">
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -649,14 +538,11 @@
 		transform: translateZ(0);
 		backface-visibility: hidden;
 		-webkit-backface-visibility: hidden;
-		/* Hide video until ready to prevent flicker */
-		opacity: 0;
-		transition: opacity 0.2s ease-in-out;
 	}
 
-	/* Show video when ready */
-	.tv-video.ready {
-		opacity: 1;
+	/* Hide video during loading transitions */
+	.tv-video.loading {
+		opacity: 0;
 	}
 
 	/* Portrait video handling - center with black bars */
@@ -679,11 +565,6 @@
 		transition: opacity 0.1s ease-out;
 	}
 
-	/* Even faster transition when Pi is ready */
-	.tv-video.pi-optimized.ready {
-		transition: opacity 0.05s ease-out;
-	}
-
 	/* Black screen overlay to prevent flicker */
 	.black-screen-overlay {
 		position: absolute;
@@ -694,11 +575,6 @@
 		background: #000;
 		z-index: 10;
 		pointer-events: none;
-	}
-
-	/* Faster removal for Pi */
-	.black-screen-overlay.pi-optimized {
-		transition: opacity 0.1s ease-out;
 	}
 
 	/* Full-width mode overrides - extremely aggressive */
