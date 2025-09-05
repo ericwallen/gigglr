@@ -25,6 +25,7 @@
 	let nextVideoIndex = $state(1);
 	let isPortraitVideo = $state(false);
 	let videoReady = $state(false);
+	let showBlackScreen = $state(true);
 
 	// Detect Raspberry Pi environment
 	function detectRaspberryPi() {
@@ -61,14 +62,31 @@
 
 	// Handle video ready state to prevent flicker
 	function handleVideoReady() {
-		videoReady = true;
-		console.log('🎬 Video ready for display');
+		// Add extra delay for embedded devices to ensure smooth playback
+		const delay = isRaspberryPi ? 300 : 100;
+
+		setTimeout(() => {
+			videoReady = true;
+			showBlackScreen = false;
+			console.log('🎬 Video ready for display');
+		}, delay);
 	}
 
 	// Reset video ready state when changing videos
 	function resetVideoReady() {
 		videoReady = false;
+		showBlackScreen = true;
 		console.log('🔄 Resetting video ready state');
+
+		// Fallback timeout to ensure black screen doesn't stay forever
+		const fallbackDelay = isRaspberryPi ? 3000 : 2000;
+		setTimeout(() => {
+			if (!videoReady) {
+				console.log('⚠️ Fallback: Forcing video display after timeout');
+				videoReady = true;
+				showBlackScreen = false;
+			}
+		}, fallbackDelay);
 	}
 
 	// Preload the next video
@@ -328,12 +346,22 @@
 			// Video metadata is loaded, but wait for first frame
 		}}
 		onloadeddata={() => {
-			// First frame is loaded and ready to display
-			handleVideoReady();
+			// First frame is loaded - wait for playing event for embedded devices
+			if (!isRaspberryPi) {
+				handleVideoReady();
+			}
 		}}
 		oncanplay={() => {
-			// Video can start playing - additional safety for readiness
-			if (!videoReady) handleVideoReady();
+			// Video can start playing - for Pi, wait for actual playback
+			if (!isRaspberryPi && !videoReady) {
+				handleVideoReady();
+			}
+		}}
+		onplaying={() => {
+			// Video is actually playing - safest point for embedded devices
+			if (isRaspberryPi || !videoReady) {
+				handleVideoReady();
+			}
 		}}
 		class="tv-video"
 		class:pi-optimized={isRaspberryPi}
@@ -349,6 +377,11 @@
 		<track kind="captions" />
 		Your browser does not support the video tag.
 	</video>
+
+	<!-- Black screen overlay to prevent flicker -->
+	{#if showBlackScreen}
+		<div class="black-screen-overlay" class:pi-optimized={isRaspberryPi}></div>
+	{/if}
 
 	<!-- Hidden video element for preloading next video -->
 	<video
@@ -567,6 +600,23 @@
 	/* Even faster transition when Pi is ready */
 	.tv-video.pi-optimized.ready {
 		transition: opacity 0.05s ease-out;
+	}
+
+	/* Black screen overlay to prevent flicker */
+	.black-screen-overlay {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		background: #000;
+		z-index: 10;
+		pointer-events: none;
+	}
+
+	/* Faster removal for Pi */
+	.black-screen-overlay.pi-optimized {
+		transition: opacity 0.1s ease-out;
 	}
 
 	/* Full-width mode overrides - extremely aggressive */
